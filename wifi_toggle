@@ -1,0 +1,212 @@
+/*
+  Attendance API: simple example for the 4-inch CYD (E32R40T, ST7796, 480x320)
+
+  What it does:
+    1. Connects to Wi-Fi.
+    2. Asks the website for one student:      GET  /api/students/<id>
+    3. Shows that student's name and status on the screen.
+    4. Tap the screen (or press the BOOT button) to switch the student
+       between "present" and "unknown":       POST /api/students/<id>   {"status":"present"}
+    5. Checks the website again every 10 seconds, so changes made there show up here.
+
+  Before uploading:
+    - TFT_eSPI must use User_Setup_cyd4.h (copy it over TFT_eSPI/User_Setup.h).
+    - Install the "ArduinoJson" library by Benoit Blanchon (Library Manager).
+    - Fill in the settings below.
+    - Open Tools > Serial Monitor at 115200 baud to see every request and response.
+*/
+
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <TFT_eSPI.h>
+
+// ---------- Settings: change these ----------
+const char* WIFI_NAME     = "Zoom Guest";
+const char* WIFI_PASSWORD = "Westport2025";
+const char* API_URL       = "https://attendance-demo.closed-elderberry.workers.dev";
+const char* DEVICE_KEY    = "2zxZSNvYsPIpgZUXC2V0BBrZW52AnL1I";  // don't put the real key on GitHub!
+const int   STUDENT_ID    = 3;                        // which student to show
+// --------------------------------------------
+
+const int BOOT_BUTTON = 0;  // the button labeled BOOT on the board
+
+TFT_eSPI tft = TFT_eSPI();
+
+String studentName = "";
+String studentStatus = "";
+unsigned long lastCheck = 0;
+
+
+// ===== Screen =====
+
+// Show a big line of text with a smaller line under it.
+void showMessage(String bigText, String smallText, uint16_t background) {
+  tft.fillScreen(background);
+  tft.setTextColor(TFT_WHITE, background);
+  tft.setTextDatum(MC_DATUM);  // MC = draw text centered on (x, y)
+
+  tft.setTextSize(2);
+  tft.drawString(bigText, tft.width() / 2, tft.height() / 2 - 20, 4);
+
+  tft.setTextSize(1);
+  tft.drawString(smallText, tft.width() / 2, tft.height() / 2 + 50, 4);
+}
+
+void showStudent() {
+  uint16_t color = TFT_DARKGREY;  // unknown
+  if (studentStatus == "present") {
+    color = TFT_DARKGREEN;
+  }
+  if (studentStatus == "absent") {
+    color = TFT_RED;
+  }
+  showMessage(studentStatus, studentName, color);
+}
+
+
+// ===== Talking to the website =====
+
+// The server sends errors like {"error":"Student not found"}. Pull out the message.
+String errorText(int code, String body) {
+  if (code < 0) {
+    return HTTPClient::errorToString(code);  // no response at all (Wi-Fi, wrong URL, ...)
+  }
+  JsonDocument doc;
+  if (deserializeJson(doc, body)) {
+    return body;  // not JSON, show it as-is
+  }
+  return doc["error"].as<String>();
+}
+
+// GET /api/students/<id>   (no key needed, anyone can look)
+bool getStudent() {
+  String url = String(API_URL) + "/api/students/" + STUDENT_ID;
+
+  WiFiClientSecure client;
+  client.setInsecure();  // skip checking the website's certificate (fine for a demo)
+  HTTPClient http;
+  http.begin(client, url);
+
+  int code = http.GET();
+  String body = http.getString();
+  http.end();
+
+  Serial.println("GET " + url);
+  Serial.println("  -> " + String(code) + " " + body);
+
+  if (code != 200) {
+    showMessage("Error " + String(code), errorText(code, body), TFT_MAROON);
+    return false;
+  }
+
+  // body looks like: {"student":{"id":1,"name":"Ada","status":"present",...}}
+  JsonDocument doc;
+  deserializeJson(doc, body);
+  studentName = doc["student"]["name"].as<String>();
+  studentStatus = doc["student"]["status"].as<String>();
+  return true;
+}
+
+// POST /api/students/<id>  with body {"status":"..."}   (needs the device key)
+bool setStatus(String newStatus) {
+  String url = String(API_URL) + "/api/students/" + STUDENT_ID;
+  String json = "{\"status\":\"" + newStatus + "\"}";
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.begin(client, url);
+  http.addHeader("Authorization", String("Bearer ") + DEVICE_KEY);
+  http.addHeader("Content-Type", "application/json");
+
+  int code = http.POST(json);
+  String body = http.getString();
+  http.end();
+
+  Serial.println("POST " + url + "  " + json);
+  Serial.println("  -> " + String(code) + " " + body);
+
+  if (code != 200) {
+    showMessage("Error " + String(code), errorText(code, body), TFT_MAROON);
+    return false;
+  }
+
+  JsonDocument doc;
+  deserializeJson(doc, body);
+  studentStatus = doc["student"]["status"].as<String>();
+  return true;
+}
+
+
+// ===== Input =====
+
+// True while the screen is being touched or the BOOT button is held down.
+bool isPressed() {
+  if (digitalRead(BOOT_BUTTON) == LOW) {
+    return true;
+  }
+#ifdef TOUCH_CS  // only if User_Setup.h turned on touch support
+  if (tft.getTouchRawZ() > 500) {  // "Z" = how hard the screen is pressed
+    return true;
+  }
+#endif
+  return false;
+}
+
+
+// ===== Main program =====
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BOOT_BUTTON, INPUT_PULLUP);
+
+  tft.init();
+  tft.setRotation(1);  // landscape: 480 wide x 320 tall
+
+  showMessage("Wi-Fi...", WIFI_NAME, TFT_NAVY);
+  WiFi.begin(WIFI_NAME, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  Serial.println("Connected! IP address: " + WiFi.localIP().toString());
+
+  showMessage("Loading...", "Student " + String(STUDENT_ID), TFT_NAVY);
+  if (getStudent()) {
+    showStudent();
+  }
+  lastCheck = millis();
+}
+
+void loop() {
+  // Tap: switch between "present" and "unknown"
+  if (isPressed()) {
+    String newStatus;
+    if (studentStatus == "present") {
+      newStatus = "unknown";
+    } else {
+      newStatus = "present";
+    }
+
+    showMessage("Sending...", newStatus, TFT_NAVY);
+    if (setStatus(newStatus)) {
+      showStudent();
+    }
+
+    while (isPressed()) {
+      delay(20);  // wait until the finger is lifted, so one tap = one change
+    }
+    lastCheck = millis();
+  }
+
+  // Every 10 seconds, ask the website again (someone may have changed it there)
+  if (millis() - lastCheck > 10000) {
+    if (getStudent()) {
+      showStudent();
+    }
+    lastCheck = millis();
+  }
+}
