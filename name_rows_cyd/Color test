@@ -1,0 +1,178 @@
+
+#include <SPI.h>
+#include <TFT_eSPI.h>
+#include <XPT2046_Touchscreen.h>
+
+TFT_eSPI tft = TFT_eSPI();
+
+#define XPT2046_IRQ 36
+#define XPT2046_MOSI 32
+#define XPT2046_MISO 39
+#define XPT2046_CLK 25
+#define XPT2046_CS 33
+
+SPIClass touchscreenSPI = SPIClass(VSPI);
+XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
+
+#define SCREEN_WIDTH 320
+#define SCREEN_HEIGHT 240
+#define ROW_HEIGHT 40
+#define FONT_SIZE 2
+
+int x, y, z;
+int selectedStatus = -1;
+
+uint16_t colors[6] = {
+  0x766E, // #77CC77 Present
+  0xA6E1, // #A3DE0B Partially present
+  0xCBCE, // #CC7777 Absent
+  0xDC64, // #DB8C23 Partially absent
+  0xDD1B, // #DEA0DE Remote
+  0xFFFA  // #FFFFCC Unknown
+};
+
+String statuses[6] = {
+  "Present",
+  "Present, but gone",
+  "Absent",
+  "Absent, but here",
+  "Remote Learning",
+  "Status Unknown"
+};
+
+String secondLines[6] = {
+  "",
+  "for part of the day",
+  "",
+  "for part of the day",
+  "",
+  ""
+};
+
+uint16_t hexTo565(uint32_t hex) {
+  uint8_t r = (hex >> 16) & 0xFF;
+  uint8_t g = (hex >> 8) & 0xFF;
+  uint8_t b = hex & 0xFF;
+
+  return tft.color565(r, g, b);
+}
+
+void drawStatus(int i) {
+  int top = i * ROW_HEIGHT;
+
+  tft.fillRect(
+    0, top,
+    SCREEN_WIDTH, ROW_HEIGHT,
+    colors[i]
+  );
+
+  tft.setTextColor(TFT_DARKGREY, colors[i]);
+  tft.setTextSize(1);
+
+  if (secondLines[i] == "") {
+    tft.drawString(
+      statuses[i], 6, top + 12, FONT_SIZE
+    );
+  } else {
+    tft.drawString(
+      statuses[i], 6, top + 3, FONT_SIZE
+    );
+
+    tft.drawString(
+      secondLines[i], 6, top + 21, FONT_SIZE
+    );
+  }
+
+  if (selectedStatus == i) {
+    tft.drawRect(
+      0, top,
+      SCREEN_WIDTH, ROW_HEIGHT,
+      TFT_BLACK
+    );
+    tft.drawRect(
+      1, top + 1,
+      SCREEN_WIDTH - 2, ROW_HEIGHT - 2,
+      TFT_BLACK
+    );
+  }
+}
+
+void drawScreen() {
+  tft.fillScreen(TFT_WHITE);
+
+  for (int i = 0; i < 6; i++) {
+    drawStatus(i);
+  }
+}
+
+void printTouchToSerial(int touchX, int touchY, int touchZ) {
+  Serial.print("X = ");
+  Serial.print(touchX);
+  Serial.print(" | Y = ");
+  Serial.print(touchY);
+  Serial.print(" | Pressure = ");
+  Serial.println(touchZ);
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  touchscreenSPI.begin(
+    XPT2046_CLK,
+    XPT2046_MISO,
+    XPT2046_MOSI,
+    XPT2046_CS
+  );
+
+  touchscreen.begin(touchscreenSPI);
+  touchscreen.setRotation(1);
+
+  tft.init();
+  tft.setRotation(1);
+
+  colors[0] = hexTo565(0x77CC77);
+  colors[1] = hexTo565(0xA3DE0B);
+  colors[2] = hexTo565(0xCC7777);
+  colors[3] = hexTo565(0xDB8C23);
+  colors[4] = hexTo565(0xDEA0DE);
+  colors[5] = hexTo565(0xFFFFCC);
+
+  drawScreen();
+}
+
+void loop() {
+  if (touchscreen.tirqTouched() && touchscreen.touched()) {
+    TS_Point p = touchscreen.getPoint();
+
+    x = map(p.x, 200, 3700, 1, SCREEN_WIDTH);
+    y = map(p.y, 240, 3800, 1, SCREEN_HEIGHT);
+    z = p.z;
+
+    x = constrain(x, 0, SCREEN_WIDTH - 1);
+    y = constrain(y, 0, SCREEN_HEIGHT - 1);
+
+    printTouchToSerial(x, y, z);
+
+    int tappedStatus = y / ROW_HEIGHT;
+
+    if (tappedStatus >= 0 && tappedStatus < 6) {
+      selectedStatus = tappedStatus;
+
+      Serial.print("Selected: ");
+      Serial.print(statuses[selectedStatus]);
+
+      if (secondLines[selectedStatus] != "") {
+        Serial.print(" ");
+        Serial.print(secondLines[selectedStatus]);
+      }
+
+      Serial.println();
+
+      drawScreen();
+    }
+
+    while (touchscreen.touched()) {
+      delay(10);
+    }
+  }
+}
