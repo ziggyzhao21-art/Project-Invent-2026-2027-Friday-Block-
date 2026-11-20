@@ -1,21 +1,37 @@
+//#include <Elegoo_GFX.h>    // Core graphics library
+//#include <Elegoo_TFTLCD.h> // Hardware-specific library
+#include <TouchScreen.h>
+
+
+
+
+
+
+
+
+
+
+
 void setup() {
   // put your setup code here, to run once:
-  char  name[number of values]
-  Int len= strlen(name)
-  Name[len + 1] = “value you want to add”
 
   //Making buttons
 
-  Elegoo_GFX_Btoon buttons[6]’
-  char button_labels[3][2] = {“1”,”2”,”3”,”4”,”5”,”6”};
+  //Elegoo_GFX_Btoon buttons[6];
+  char button_labels[6] = {"1","2","3","4","5","6"};
+  for i in button_labels:{
+    btn.initButton( idk(gfx),  idk(x),  idk(y),  idk(width),  idk(height),  TFT_WHITE(outline),  TFT_PINK(fil)l,  TFTA_WHITE(textcolor), i(label), idk(textsize));
+    btn.drawButton();
+  }
 
-  For i in button_labels:
-	  btn.initButton( idk(gfx),  idk(x),  idk(y),  idk(width),  idk(height),  TFT_WHITE(outline),  TFT_PINK(fil)l,  TFTA_WHITE(textcolor), i(label), idk(textsize));
-	  btn.rawButton();
+    
+  }
+
+
 
   //Making password 
-  char password[6]  = “12345”;
-  char input_password [6] - “”;
+  char password[6] = {"1","2","3","4","5","6"};
+  char input_password[6] = {};
   bool password_correct = false;
 
   //Seeing if touchscreen was touched
